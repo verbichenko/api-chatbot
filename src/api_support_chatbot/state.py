@@ -48,18 +48,19 @@ class ResponseItem(BaseModel):
     """Response for a single request item."""
     
     request_id: str = Field(description="ID of the request this response addresses")
-    response_content: str = Field(description="The response content")
-    sources: List[str] = Field(
-        default_factory=list,
-        description="List of sources used to generate the response"
+    request_text: str = Field(description="Leave this blank.")
+    response_text: str = Field(description="Text of the response to the request")
+    response_found: bool = Field(
+        default=False,
+        description="Whether a valid response was found for the request"
+    )
+    product_id: Optional[str] = Field(
+        default=None,
+        description="The product ID relevant to this request item"
     )
     confidence: float = Field(
         default=1.0,
         description="Confidence in the response accuracy"
-    )
-    requires_followup: bool = Field(
-        default=False,
-        description="Whether this response requires follow-up"
     )
 
 
@@ -80,21 +81,40 @@ class FinalResponse(BaseModel):
         description="Expected customer satisfaction score"
     )
 
-
-# State Definitions
-class ChatbotInputState(MessagesState):
-    """Input state for the chatbot - only contains messages."""
-    pass
+def items_reducer(current_value, new_value):
+    """Reducer function that handles both individual items and lists, and allows clearing."""
+    if isinstance(new_value, list) and new_value == []:
+        # Clear the list
+        return []
+    elif isinstance(new_value, list):
+        # Add list to current list
+        return operator.add(current_value, new_value)
+    else:
+        # Add individual item to current list
+        return current_value + [new_value]
 
 
 class ChatbotState(MessagesState):
     """Main chatbot state containing all conversation and processing data."""
-    
-    # Request processing
+
+    clarification_attempts: int
+    max_clarification_attempts: int
+
     request_details: Optional[RequestDetails] = None
-    request_items: List[RequestItem] = Field(default_factory=list)
-    response_items: List[ResponseItem] = Field(default_factory=list)
+    request_items: Annotated[list[RequestItem], items_reducer] = []
+    response_items: Annotated[list[ResponseItem], items_reducer] = []
     final_response: Optional[FinalResponse] = None
+
+
+    #request_items: List[RequestItem] = Field(default_factory=list)
+    #response_items: List[ResponseItem] = Field(default_factory=list)
+
+    # TODO: remove unnecessary below
+    # Request processing
+    
+    
+    
+    
     
     # MCP tool context
     mcp_context: Dict[str, Any] = Field(default_factory=dict)
@@ -111,12 +131,13 @@ class ChatbotState(MessagesState):
     session_metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+
 class RequestDetailsState(MessagesState):
     """State for the Get Request Details agent."""
     
     request_details: Optional[RequestDetails] = None
     clarification_attempts: int = 0
-    max_clarification_attempts: int = 3
+    max_clarification_attempts: int = 5
 
 
 class CoordinatorState(MessagesState):

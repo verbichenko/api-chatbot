@@ -73,7 +73,7 @@ class Configuration(BaseModel):
     mcp_servers: Dict[str, MCPServerConfig] = Field(
         default_factory=lambda: {
             "api_support": MCPServerConfig(
-                url=os.getenv("MCP_API_SUPPORT_SERVER_URL", "http://localhost:9000/mcp/"),
+                url=os.getenv("MCP_API_SUPPORT_SERVER_URL", "http://localhost:9000/mcp"),
                 transport=MCPTransport(os.getenv("MCP_API_SUPPORT_SERVER_TRANSPORT", "streamable_http"))
             )
         },
@@ -92,10 +92,6 @@ class Configuration(BaseModel):
     request_timeout: int = Field(
         default_factory=lambda: int(os.getenv("REQUEST_TIMEOUT", "30")),
         description="Request timeout in seconds"
-    )
-    enable_clarification: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_CLARIFICATION", "true").lower() == "true",
-        description="Whether to enable clarification requests"
     )
     
     # Model Configuration
@@ -131,6 +127,7 @@ class Configuration(BaseModel):
         """Get Azure OpenAI connection parameters."""
         return {
             "": self.azure_openai_endpoint,
+            "azure_endpoint": self.azure_openai_endpoint,
             "api_key": self.azure_openai_api_key,
             "api_version": self.azure_openai_api_version,
             "azure_deployment": self.azure_openai_deployment_name,
