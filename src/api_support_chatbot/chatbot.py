@@ -368,7 +368,7 @@ async def generate_response(
             f"Generated response for item {request_item.id} after {iteration} iterations",
             {
                 "Request Text": request_item.request_text[:100] + ("..." if len(request_item.request_text) > 100 else ""),
-                "Response Text": response_item.response_content[:100] + ("..." if len(response_item.response_content) > 100 else "") if hasattr(response_item, 'response_content') else "No content",
+                "Response Text": response_item.response_text[:100] + ("..." if len(response_item.response_text) > 100 else "") if hasattr(response_item, 'response_text') else "No content",
                 "Iterations": iteration
             }
         )
@@ -401,8 +401,25 @@ async def assemble_final_response(
         # Get configuration
         configuration = Configuration.from_runnable_config(config)
         response_items = state.get("response_items", [])
-        
-        if not response_items:
+        qa_pairs = ""
+        for item in response_items:
+            response_text = item.response_text if item.response_found and item.response_text else "Cound not answer the request"
+            qa_pairs += """
+            <REQUEST TEXT. PRODUCT ID={product_id}>
+            {request_text}
+            </REQUEST TEXT>
+
+            <GENERATED RESPONCE. CONFIDENCE={confidence}>
+            {response_text}
+            </GENARTED RESPONCE>
+            """.format(
+              product_id = item.product_id,
+              request_text = item.request_text,
+              confidence = item.confidence,
+              response_text = response_text
+            )
+
+        if not qa_pairs:
             error_msg = "No response items available for assembly"
             return Command(
                 graph=END,
@@ -411,8 +428,6 @@ async def assemble_final_response(
                     "messages": [AIMessage(content="I apologize, but I wasn't able to generate a response to your request. Please try again or rephrase your question.")]
                 }
             )
-        print("Stopping here...")
-        exit(0)
 
         # Configure the model for structured output
         azure_params = configuration.get_azure_openai_params()
@@ -426,53 +441,32 @@ async def assemble_final_response(
         )
         
         # Create system prompt
-        system_prompt = format_assembler_prompt(get_today_str())
-        
-        # Prepare assembly context
-        response_summaries = []
-        all_sources = []
-        
-        for item in response_items:
-            response_summaries.append(f"Item {item.request_id}: {item.response_content}")
-            all_sources.extend(item.sources)
-        
-        assembly_prompt = f"""
-        Customer request: {extract_last_human_message(state["messages"])}
-        
-        Response items to assemble:
-        {"\n".join(response_summaries)}
-        
-        Please create a comprehensive, well-structured final response that addresses all aspects of the customer's request.
-        """
+        system_prompt = format_assembler_prompt()
         
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=assembly_prompt)
+            HumanMessage(content=qa_pairs)
         ]
         
         # Generate final response
         final_response = await model.ainvoke(messages)
         
         # Add sources to the response content
-        if all_sources:
-            final_response.response_text += f"\n\n**Sources:**\n" + "\n".join(f"- {source}" for source in set(all_sources))
         
         log_agent_action(
             "ResponseAssembler",
             "Completed final response assembly",
             {
                 "response_items_count": len(response_items),
-                "sources_count": len(set(all_sources)),
-                "satisfaction_score": final_response.satisfaction_score
+                "Response Text": final_response.response_text[:100] + ("..." if len(final_response.response_text) > 100 else "") if hasattr(final_response, 'response_text') else "No content",
             }
         )
         
         return Command(
-            graph=END,
             update={
                 "final_response": final_response,
                 "processing_complete": True,
-                "messages": [AIMessage(content=final_response.response_text)]
+                "messages": [AIMessage(content=final_response.response_text + "\n\n" + final_response.follow_up_question)] if final_response and final_response.response_text else [AIMessage(content="I apologize, but I wasn't able to generate a response to your request. Please try again or rephrase your question.")],
             }
         )
         
@@ -481,13 +475,7 @@ async def assemble_final_response(
         log_agent_action("ResponseAssembler", "Error occurred", {"error": error_msg})
         
         # Provide fallback response
-        fallback_content = "I apologize, but I encountered an issue while preparing your response. "
-        if state.get("response_items"):
-            # Try to provide basic concatenation as fallback
-            basic_responses = [item.response_content for item in state["response_items"]]
-            fallback_content += "Here's the information I was able to gather:\n\n" + "\n\n".join(basic_responses)
-        else:
-            fallback_content += "Please try rephrasing your question or contact support directly."
+        fallback_content = "I apologize, but I encountered an issue while preparing your response. Please rephrase your question or contact support for further assistance."
         
         return Command(
             graph=END,

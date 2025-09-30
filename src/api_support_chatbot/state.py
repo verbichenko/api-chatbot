@@ -68,18 +68,12 @@ class FinalResponse(BaseModel):
     """Final assembled response for the customer."""
     
     response_text: str = Field(description="The final response text")
-    sources: List[str] = Field(
-        default_factory=list,
-        description="All sources used in the response"
+    
+    follow_up_question: Optional[str] = Field(
+        default=None,
+        description="Suggested follow-up question for the customer"
     )
-    follow_up_questions: List[str] = Field(
-        default_factory=list,
-        description="Suggested follow-up questions for the customer"
-    )
-    satisfaction_score: float = Field(
-        default=1.0,
-        description="Expected customer satisfaction score"
-    )
+
 
 def items_reducer(current_value, new_value):
     """Reducer function that handles both individual items and lists, and allows clearing."""
@@ -111,9 +105,6 @@ class ChatbotState(MessagesState):
 
     # TODO: remove unnecessary below
     # Request processing
-    
-    
-    
     
     
     # MCP tool context
