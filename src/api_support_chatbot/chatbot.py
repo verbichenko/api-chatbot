@@ -58,6 +58,59 @@ async def initialize_mcp_client(config: Configuration) -> MultiServerMCPClient:
     mcp_connections = config.get_mcp_connections()
     return MultiServerMCPClient(mcp_connections)
 
+def split_messages_context(messages: List[BaseMessage]) -> tuple[List[BaseMessage], List[BaseMessage]]:
+    """
+    Split messages into historical and current context.
+    
+    Args:
+        messages: List of conversation messages
+        
+    Returns:
+        Tuple of (historical_messages, messages_to_clarify)
+        - historical_messages: Messages from beginning to last final_response (inclusive)
+        - messages_to_clarify: Messages after the last final_response
+    """
+    if not messages:
+        return [], []
+    
+    # Find the last message with final_response metadata set to True
+    last_final_response_index = -1
+    for i in range(len(messages) - 1, -1, -1):
+        message_metadata = messages[i].additional_kwargs.get("artifact", {})
+        #message_metadata = getattr(messages[i], 'artifact', {})
+        if message_metadata.get('final_response') == True:
+            last_final_response_index = i
+            break
+    
+    # If no final_response found, all messages are for clarification
+    if last_final_response_index == -1:
+        return [], messages
+    
+    # Split at the last final_response
+    historical_messages = messages[:last_final_response_index + 1]
+    current_messages = messages[last_final_response_index + 1:]
+    
+    return historical_messages, current_messages    
+
+def messages_to_text(messages: List[BaseMessage]) -> str:
+    """Convert a list of messages to a single text block."""
+    return "\n\n".join([f"{msg.type}: \n{msg.content}" for msg in messages])
+
+def format_conversation_context(messages: List[BaseMessage]) -> str:
+    historical_conversation_msg, conversation_msg = split_messages_context(messages)  
+    conversation = messages_to_text(conversation_msg)
+    historical_conversation = messages_to_text(historical_conversation_msg)
+    prompt = """
+    <HISTORICAL CONVERSATION>
+    {historical_conversation}
+    </HISTORICAL CONVERSATION>
+
+    <CONVERSATION>
+    {conversation}
+    </CONVERSATION>
+    """
+    return prompt.format(conversation=conversation, historical_conversation=historical_conversation)
+
 
 async def get_request_details(
     state: ChatbotState, config: RunnableConfig
@@ -97,9 +150,13 @@ async def get_request_details(
         
         # Create system prompt
         system_prompt = format_request_details_prompt()
+
+        # Split messages to isolate area that we are clairifying
         
+        
+        clarification_text = format_conversation_context(state["messages"])
         # Analyze the request
-        messages = [SystemMessage(content=system_prompt)] + state["messages"]
+        messages = [SystemMessage(content=system_prompt)] + [HumanMessage(content=clarification_text)]
         
         request_details = await model.ainvoke(messages)
         
@@ -111,7 +168,7 @@ async def get_request_details(
         
         # Determine next step
         cl_att = state.get("clarification_attempts", 0)
-        max_att = state.get("max_clarification_attempts", 0)
+        max_att = state.get("max_clarification_attempts", 1)
 
         if ( not request_details.valid_request_received and
             #state.get("clarification_attempts", 0) < state.get("max_clarification_attempts", 5) ):
@@ -187,8 +244,10 @@ async def coordinate_response(
         
         # Create system prompt
         system_prompt = format_coordinator_prompt()
-        
-        messages = [SystemMessage(content=system_prompt)] + state["messages"]
+
+        conversation_text = format_conversation_context(state["messages"])
+
+        messages = [SystemMessage(content=system_prompt)] + [HumanMessage(content=conversation_text)]
 
         # Generate request items
         request_items = await model.ainvoke(messages)
@@ -461,12 +520,14 @@ async def assemble_final_response(
                 "Response Text": final_response.response_text[:100] + ("..." if len(final_response.response_text) > 100 else "") if hasattr(final_response, 'response_text') else "No content",
             }
         )
-        
+        ai_message = AIMessage(content = final_response.response_text + "\n\n" + final_response.follow_up_question) if final_response and final_response.response_text else AIMessage(content="I apologize, but I wasn't able to generate a response to your request. Please try again or rephrase your question.")
+        ai_message.additional_kwargs = {"artifact": {"final_response": True}}
+
         return Command(
             update={
                 "final_response": final_response,
                 "processing_complete": True,
-                "messages": [AIMessage(content=final_response.response_text + "\n\n" + final_response.follow_up_question)] if final_response and final_response.response_text else [AIMessage(content="I apologize, but I wasn't able to generate a response to your request. Please try again or rephrase your question.")],
+                "messages": [ai_message],
             }
         )
         
