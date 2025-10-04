@@ -47,9 +47,9 @@ class ExtractedRequests(BaseModel):
 class ResponseItem(BaseModel):
     """Response for a single request item."""
     
-    request_id: str = Field(description="ID of the request this response addresses")
-    request_text: str = Field(description="Leave this blank.")
-    response_text: str = Field(description="Text of the response to the request")
+    request_id: Optional[str] = Field(description="ID of the request this response addresses", default=None)
+    request_text: Optional[str] = Field(description="Leave this blank.", default="")
+    response_text: Optional[str] = Field(description="Text of the response to the request", default="No response found.")
     response_found: bool = Field(
         default=False,
         description="Whether a valid response was found for the request"
@@ -62,12 +62,16 @@ class ResponseItem(BaseModel):
         default=1.0,
         description="Confidence in the response accuracy"
     )
+    error: bool = Field(
+        default=False,
+        description="Whether there was an error processing this request"
+    )
 
 
-class FinalResponse(BaseModel):
+class AssembledResponse(BaseModel):
     """Final assembled response for the customer."""
     
-    response_text: str = Field(description="The final response text")
+    response_text: str = Field(description="The final assembled response text")
     
     follow_up_question: Optional[str] = Field(
         default=None,
@@ -97,87 +101,4 @@ class ChatbotState(MessagesState):
     request_details: Optional[RequestDetails] = None
     request_items: Annotated[list[RequestItem], items_reducer] = []
     response_items: Annotated[list[ResponseItem], items_reducer] = []
-    final_response: Optional[FinalResponse] = None
-
-
-    #request_items: List[RequestItem] = Field(default_factory=list)
-    #response_items: List[ResponseItem] = Field(default_factory=list)
-
-    # TODO: remove unnecessary below
-    # Request processing
-    
-    
-    # MCP tool context
-    mcp_context: Dict[str, Any] = Field(default_factory=dict)
-    available_tools: List[str] = Field(default_factory=list)
-    
-    # Processing flags
-    needs_clarification: bool = False
-    processing_complete: bool = False
-    error_state: Optional[str] = None
-    
-    # Metadata
-    conversation_id: Optional[str] = None
-    customer_id: Optional[str] = None
-    session_metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
-
-class RequestDetailsState(MessagesState):
-    """State for the Get Request Details agent."""
-    
-    request_details: Optional[RequestDetails] = None
-    clarification_attempts: int = 0
-    max_clarification_attempts: int = 5
-
-
-class CoordinatorState(MessagesState):
-    """State for the Response Coordinator agent."""
-    
-    request_details: Optional[RequestDetails] = None
-    request_items: List[RequestItem] = Field(default_factory=list)
-    delegation_complete: bool = False
-
-
-class ResponseAgentState(MessagesState):
-    """State for individual Response Agent instances."""
-    
-    request_item: Optional[RequestItem] = None
-    response_item: Optional[ResponseItem] = None
-    mcp_context: Dict[str, Any] = Field(default_factory=dict)
-    tools_used: List[str] = Field(default_factory=list)
-
-
-class AssemblerState(MessagesState):
-    """State for the Response Assembler agent."""
-    
-    request_items: List[RequestItem] = Field(default_factory=list)
-    response_items: List[ResponseItem] = Field(default_factory=list)
-    final_response: Optional[FinalResponse] = None
-    assembly_complete: bool = False
-
-
-# Output States for subgraphs
-class RequestDetailsOutputState(BaseModel):
-    """Output state from Request Details agent."""
-    
-    request_details: RequestDetails
-    needs_clarification: bool = False
-
-
-class CoordinatorOutputState(BaseModel):
-    """Output state from Response Coordinator agent."""
-    
-    request_items: List[RequestItem]
-
-
-class ResponseAgentOutputState(BaseModel):
-    """Output state from Response Agent."""
-    
-    response_item: ResponseItem
-
-
-class AssemblerOutputState(BaseModel):
-    """Output state from Response Assembler agent."""
-    
-    final_response: FinalResponse
+    assembled_response: Optional[AssembledResponse] = None

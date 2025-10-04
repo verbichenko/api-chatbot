@@ -64,6 +64,10 @@ class Configuration(BaseModel):
         default_factory=lambda: os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1-mini"),
         description="Azure OpenAI deployment name"
     )
+    azure_hq_openai_deployment_name: str = Field(
+        default_factory=lambda: os.getenv("AZURE_HQ_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
+        description="Azure OpenAI HQ deployment name for high-quality responses"
+    )
     azure_openai_model_name: str = Field(
         default_factory=lambda: os.getenv("AZURE_OPENAI_MODEL_NAME", "gpt-4.1-mini"),
         description="Azure OpenAI model name"
@@ -100,7 +104,7 @@ class Configuration(BaseModel):
         description="Temperature for model responses"
     )
     max_tokens: int = Field(
-        default=2000,
+        default=2500,
         description="Maximum tokens for model responses"
     )
     
@@ -123,18 +127,6 @@ class Configuration(BaseModel):
         else:
             return cls.from_env()
     
-    def get_azure_openai_params(self) -> Dict[str, Any]:
-        """Get Azure OpenAI connection parameters."""
-        return {
-            "": self.azure_openai_endpoint,
-            "azure_endpoint": self.azure_openai_endpoint,
-            "api_key": self.azure_openai_api_key,
-            "api_version": self.azure_openai_api_version,
-            "azure_deployment": self.azure_openai_deployment_name,
-            "model": self.azure_openai_model_name,
-            "temperature": self.model_temperature,
-            "max_tokens": self.max_tokens,
-        }
     
     def get_mcp_connections(self) -> Dict[str, Dict[str, Any]]:
         """Get MCP server connections dictionary."""

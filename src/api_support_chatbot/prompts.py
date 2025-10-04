@@ -3,7 +3,7 @@
 from typing import Dict, Any
 
 GREETING_MESSAGE = """Hello! I'm an AI assistant here to help you with any Lightspeed API questions or issues. How can I assist you today?"""
-
+GENERIC_ERROR_MSG = "Apologies, but I'm currently experiencing some technical difficulties and unable to process your request."
 
 API_SCOPE_CATEGORIES = """
 

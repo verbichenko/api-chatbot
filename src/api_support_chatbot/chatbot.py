@@ -1,9 +1,6 @@
 """Main chatbot implementation with LangGraph multi-agent architecture."""
 
-import asyncio
 from typing import Any, Dict, List, Literal, Optional
-
-from langchain.chat_models import init_chat_model
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.constants import Send
@@ -11,7 +8,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_react_agent
 from langchain_openai import AzureChatOpenAI
 import json
 
@@ -23,33 +19,19 @@ from src.api_support_chatbot.state import (
     RequestItem,
     ExtractedRequests,
     ResponseItem,
-    FinalResponse,
-    RequestDetailsOutputState,
-    CoordinatorOutputState,
-    ResponseAgentOutputState,
-    AssemblerOutputState,
+    AssembledResponse,
 )
 from src.api_support_chatbot.prompts import (
     format_request_details_prompt,
     format_coordinator_prompt,
     format_response_agent_prompt,
     format_assembler_prompt,
-    format_greeting_message,
+    GENERIC_ERROR_MSG,
 )
 from src.api_support_chatbot.utils import (
-    get_today_str,
     generate_request_id,
-    generate_conversation_id,
-    extract_last_human_message,
     log_agent_action,
     create_error_message,
-    calculate_confidence_score,
-)
-
-
-# Initialize configurable model
-configurable_model = init_chat_model(model_provider="azure_openai",
-    configurable_fields=("model", "temperature", "max_tokens", "azure_endpoint", "api_key", "api_version", "azure_deployment"),
 )
 
 
@@ -57,6 +39,22 @@ async def initialize_mcp_client(config: Configuration) -> MultiServerMCPClient:
     """Initialize MCP client with configured servers."""
     mcp_connections = config.get_mcp_connections()
     return MultiServerMCPClient(mcp_connections)
+
+def _get_azure_chat_model(configuration: Configuration, hq_model: bool = False) -> AzureChatOpenAI:
+    """Helper function to create an AzureChatOpenAI instance from configuration."""
+    if hq_model:
+        deployment = configuration.azure_hq_openai_deployment_name
+    else:
+        deployment = configuration.azure_openai_deployment_name
+
+    return AzureChatOpenAI(
+        model = deployment,
+        temperature = configuration.model_temperature,
+        max_tokens = configuration.max_tokens,
+        azure_endpoint = configuration.azure_openai_endpoint,
+        api_key = configuration.azure_openai_api_key,
+        api_version = configuration.azure_openai_api_version
+    )
 
 def split_messages_context(messages: List[BaseMessage]) -> tuple[List[BaseMessage], List[BaseMessage]]:
     """
@@ -125,25 +123,11 @@ async def get_request_details(
         # Get configuration
         configuration = Configuration.from_runnable_config(config)
         
-        # Extract the latest customer message
-        last_message = extract_last_human_message(state["messages"])
-        # We are at the beginning of a new conversation
-        if not last_message:
-            return Command(
-                graph=END,
-                update={
-                    "messages": [AIMessage(content=format_greeting_message())],
-                    },
-                goto=END
-                )
-        
         # Configure the model for structured output
-        azure_params = configuration.get_azure_openai_params()
         model = (
-            configurable_model
+            _get_azure_chat_model(configuration)
             .with_structured_output(RequestDetails)
             .with_config({
-                "configurable": azure_params,
                 "tags": ["get_request_details"]
             })
         )
@@ -152,8 +136,6 @@ async def get_request_details(
         system_prompt = format_request_details_prompt()
 
         # Split messages to isolate area that we are clairifying
-        
-        
         clarification_text = format_conversation_context(state["messages"])
         # Analyze the request
         messages = [SystemMessage(content=system_prompt)] + [HumanMessage(content=clarification_text)]
@@ -166,13 +148,9 @@ async def get_request_details(
             request_details.model_dump(mode="json")
         )
         
-        # Determine next step
-        cl_att = state.get("clarification_attempts", 0)
-        max_att = state.get("max_clarification_attempts", 1)
-
+        # Check if we have all necessary details to proceed or exceed max attempts
         if ( not request_details.valid_request_received and
-            #state.get("clarification_attempts", 0) < state.get("max_clarification_attempts", 5) ):
-            cl_att < max_att ):
+            state.get("clarification_attempts", 0) < state.get("max_clarification_attempts", 3) ):
 
             # Condinue dialog to clarify the request
             response = ""
@@ -180,11 +158,12 @@ async def get_request_details(
                 response += str(request_details.clarifying_question)
             if not request_details.clarifying_question and request_details.dialog_message:
                 response += str(request_details.dialog_message)
+            # Continue clarification loop
             return Command(
                 graph=END,
                 update={
                     "messages": [AIMessage(content=response)],
-                    "clarification_attempts": cl_att + 1
+                    "clarification_attempts": state.get("clarification_attempts", 0) + 1
                     },
                 goto=END
                 )
@@ -198,7 +177,7 @@ async def get_request_details(
                     "clarification_attempts": 0,
                     "request_items": [], # Reset previous requests
                     "response_items": [], # Reset previous responses
-                    #TODO: Add history items here
+                    #TODO: Add streaming through AIMessageChunk
                     "messages": [AIMessage(content="Working on your request...")],
                 },
                 goto="coordinate_response"
@@ -209,7 +188,8 @@ async def get_request_details(
         log_agent_action("GetRequestDetails", "Error occurred", {"error": error_msg})
         return Command(
             graph=END,
-            update={"error_state": error_msg}
+            update={"messages": [AIMessage(content = f"{GENERIC_ERROR_MSG} {error_msg} ")]},
+            goto=END
         )
 
 
@@ -230,28 +210,19 @@ async def coordinate_response(
         
         if not request_details:
             raise ValueError("No request details available for coordination")
-        
         # Configure the model for structured output
-        azure_params = configuration.get_azure_openai_params()
         model = (
-            configurable_model
+            _get_azure_chat_model(configuration)
             .with_structured_output(ExtractedRequests)
-            .with_config({
-                "configurable": azure_params,
-                "tags": ["response_coordinator"]
-            })
         )
-        
         # Create system prompt
         system_prompt = format_coordinator_prompt()
 
         conversation_text = format_conversation_context(state["messages"])
 
         messages = [SystemMessage(content=system_prompt)] + [HumanMessage(content=conversation_text)]
-
         # Generate request items
         request_items = await model.ainvoke(messages)
-        
         # Add unique IDs to request items
         for item in request_items.item_list:
             item.id = generate_request_id()
@@ -260,19 +231,14 @@ async def coordinate_response(
         # Create Send commands for each request item
        
         if not request_items.item_list:
-            return Command(
-                graph=END,
-                update={
-                    "messages": [AIMessage(content="I apologize, but I wasn't able to identify specific requests from your message. Could you please provide more details or clarify your question?")],
-                    },
-                goto=END
-                )
+            raise ValueError("Unable to comprehend your request.")
+        
         log_agent_action(
         "ResponseCoordinator",
         "Delegating to response agents",
         {"count": len(request_items.item_list), "items": [f"{item.id}: {item.category}" for item in request_items.item_list]}
         )        
-        # Fan out to response agents using Command
+        # Send list of items to fan out function
         return Command(
             update={"request_items": request_items.item_list},
         )
@@ -282,7 +248,7 @@ async def coordinate_response(
         log_agent_action("ResponseCoordinator", "Error occurred", {"error": error_msg})
         return Command(
             graph=END,
-            update={"error_state": error_msg},
+            update={"messages": [AIMessage(content = f"{GENERIC_ERROR_MSG} {error_msg} ")]},
             goto=END
         )
 
@@ -290,9 +256,6 @@ async def coordinate_response(
 async def fan_out_requests(state: ChatbotState) -> List[Send]:
     """Create Send commands to fan out to response agents."""
     request_items = state.get("request_items", [])
-    if not request_items:
-        raise ValueError("No request items to fan out")
-    
     sends = []
     for item in request_items:
         sends.append(
@@ -308,35 +271,28 @@ async def generate_response(
 ) -> Dict[str, ResponseItem]:
     """
     Agent 2.1: Response Agent
-    Uses MCP tools to gather context and generate responses for individual request items.
+    Uses MCP tools to gather context and generate responses for individual request item.
     """
-    request_item = data.get("request_item", None)
-    if not request_item:
-        raise ValueError("No request item provided to response agent")
-    
-    log_agent_action("ResponseAgent", f"Generating response for item {request_item.id}")
-    
     try:
+        request_item = data.get("request_item", None)
+        if not request_item:
+            raise ValueError("No request item provided to response agent")
+    
+        log_agent_action("ResponseAgent", f"Generating response for item {request_item.id}")
+    
         # Get configuration
         configuration = Configuration.from_runnable_config(config)
         
         # Initialize MCP client and get tools
-        # TODO: Optimize to avoid re-initialization
-        mcp_client = await initialize_mcp_client(configuration)
-        tools = await mcp_client.get_tools()
+        try:
+            mcp_client = await initialize_mcp_client(configuration)
+            tools = await mcp_client.get_tools()
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize MCP client or retrieve tools: {str(e)}")
         
         # Configure the model with tools
-        azure_params = configuration.get_azure_openai_params()
-
-        model = AzureChatOpenAI(
-            model = azure_params["azure_deployment"],
-            temperature = azure_params["temperature"],
-            max_tokens = azure_params["max_tokens"],
-            azure_endpoint = azure_params["azure_endpoint"],
-            api_key = azure_params["api_key"],
-            api_version = azure_params["api_version"]  
-        )    
-        model_with_tools = model.bind_tools(tools) #, tool_choice="any")
+        model = _get_azure_chat_model(configuration)
+        model_with_tools = model.bind_tools(tools)
         
         system_prompt = format_response_agent_prompt()
         
@@ -364,7 +320,6 @@ async def generate_response(
             
             # Get model response with potential tool calls
             response = await model_with_tools.ainvoke(messages)
-            
             
             # Check if there are tool calls to execute
             if hasattr(response, 'tool_calls') and response.tool_calls:
@@ -402,10 +357,10 @@ async def generate_response(
                         }
                         messages.append(tool_message)
             else:
-                # No more tool calls, break the loop
+                # No more tool calls, take the result and break the loop
                 final_response = response
                 break
-        # If we exit the loop without a final response, call the model one last time
+        # If we exit the loop without a final response, call the model one last time without tools
         if not final_response:
             final_response = await model.ainvoke(messages)
 
@@ -417,7 +372,7 @@ async def generate_response(
             request_id = request_item.id,
             request_text = request_item.request_text,
             product_id = request_item.product_id,
-            response_text = response_dict.get("response_text", "No response generated."),
+            response_text = response_dict.get("response_text", "No response found."),
             response_found = response_dict.get("response_found", False),
             confidence = response_dict.get("confidence", 0.0),
         )
@@ -441,8 +396,9 @@ async def generate_response(
         # Return error response item
         err_item = ResponseItem(
             request_id = request_item.id,
-            response_text = f"I apologize, but I encountered an error while processing your request: {error_msg}",
+            response_text = f"{GENERIC_ERROR_MSG} {error_msg}",
             response_found = False,
+            error = True
         )
         return {"response_items": err_item}
 
@@ -462,7 +418,11 @@ async def assemble_final_response(
         response_items = state.get("response_items", [])
         qa_pairs = ""
         for item in response_items:
-            response_text = item.response_text if item.response_found and item.response_text else "Cound not answer the request"
+            # Check for error in individual response item
+            if item.error:
+                raise ValueError(f"{item.response_text}")
+            
+            response_text = item.response_text if item.response_found and item.response_text else "Could not answer the request"
             qa_pairs += """
             <REQUEST TEXT. PRODUCT ID={product_id}>
             {request_text}
@@ -479,22 +439,13 @@ async def assemble_final_response(
             )
 
         if not qa_pairs:
-            error_msg = "No response items available for assembly"
-            return Command(
-                graph=END,
-                update={
-                    "error_state": error_msg,
-                    "messages": [AIMessage(content="I apologize, but I wasn't able to generate a response to your request. Please try again or rephrase your question.")]
-                }
-            )
+            raise ValueError("No valid response items to assemble.")
 
         # Configure the model for structured output
-        azure_params = configuration.get_azure_openai_params()
         model = (
-            configurable_model
-            .with_structured_output(FinalResponse)
+            _get_azure_chat_model(configuration)
+            .with_structured_output(AssembledResponse)
             .with_config({
-                "configurable": azure_params,
                 "tags": ["response_assembler"]
             })
         )
@@ -508,7 +459,7 @@ async def assemble_final_response(
         ]
         
         # Generate final response
-        final_response = await model.ainvoke(messages)
+        assembled_response = await model.ainvoke(messages)
         
         # Add sources to the response content
         
@@ -517,16 +468,17 @@ async def assemble_final_response(
             "Completed final response assembly",
             {
                 "response_items_count": len(response_items),
-                "Response Text": final_response.response_text[:100] + ("..." if len(final_response.response_text) > 100 else "") if hasattr(final_response, 'response_text') else "No content",
+                "Response Text": assembled_response.response_text[:100] + ("..." if len(assembled_response.response_text) > 100 else "") if hasattr(assembled_response, 'response_text') else "No content",
             }
         )
-        ai_message = AIMessage(content = final_response.response_text + "\n\n" + final_response.follow_up_question) if final_response and final_response.response_text else AIMessage(content="I apologize, but I wasn't able to generate a response to your request. Please try again or rephrase your question.")
+        ai_message = AIMessage(content = 
+                f"{assembled_response.response_text} \n\n {assembled_response.follow_up_question}"
+                )
         ai_message.additional_kwargs = {"artifact": {"final_response": True}}
 
         return Command(
             update={
-                "final_response": final_response,
-                "processing_complete": True,
+                "assembled_response": assembled_response,
                 "messages": [ai_message],
             }
         )
@@ -535,15 +487,13 @@ async def assemble_final_response(
         error_msg = create_error_message(e, "assemble_final_response")
         log_agent_action("ResponseAssembler", "Error occurred", {"error": error_msg})
         
-        # Provide fallback response
-        fallback_content = "I apologize, but I encountered an issue while preparing your response. Please rephrase your question or contact support for further assistance."
-        
         return Command(
             graph=END,
             update={
                 "error_state": error_msg,
-                "messages": [AIMessage(content=fallback_content)]
-            }
+                "messages": [AIMessage(content = f"{GENERIC_ERROR_MSG} {error_msg}")]
+            },
+            goto=END
         )
 
 
