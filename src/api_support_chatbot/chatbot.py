@@ -125,7 +125,7 @@ async def get_request_details(
         
         # Configure the model for structured output
         model = (
-            _get_azure_chat_model(configuration)
+            _get_azure_chat_model(configuration, hq_model=False)
             .with_structured_output(RequestDetails)
             .with_config({
                 "tags": ["get_request_details"]
@@ -144,26 +144,27 @@ async def get_request_details(
         
         log_agent_action(
             "GetRequestDetails", 
-            "Completed conversaton round",
+            "Completed conversation round",
             request_details.model_dump(mode="json")
         )
-        
+        attempts = state.get("clarification_attempts", 0)
         # Check if we have all necessary details to proceed or exceed max attempts
         if ( not request_details.valid_request_received and
-            state.get("clarification_attempts", 0) < state.get("max_clarification_attempts", 3) ):
+            attempts < state.get("max_clarification_attempts", 3) ):
 
             # Condinue dialog to clarify the request
             response = ""
             if request_details.clarifying_question:
                 response += str(request_details.clarifying_question)
-            if not request_details.clarifying_question and request_details.dialog_message:
-                response += str(request_details.dialog_message)
+                attempts += 1
+            if not request_details.clarifying_question and request_details.info_message:
+                response += str(request_details.info_message)
             # Continue clarification loop
             return Command(
                 graph=END,
                 update={
                     "messages": [AIMessage(content=response)],
-                    "clarification_attempts": state.get("clarification_attempts", 0) + 1
+                    "clarification_attempts": attempts
                     },
                 goto=END
                 )
@@ -210,6 +211,9 @@ async def coordinate_response(
         
         if not request_details:
             raise ValueError("No request details available for coordination")
+        if not request_details.produtct_id:
+            raise ValueError("No product specified.")
+        
         # Configure the model for structured output
         model = (
             _get_azure_chat_model(configuration)

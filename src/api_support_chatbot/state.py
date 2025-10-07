@@ -17,9 +17,9 @@ class RequestDetails(BaseModel):
     )    
     clarifying_question: Optional[str] = Field(
         default="",
-        description="A clarifying question to ask the customer if any details are missing."
+        description="Use if you have received an intelligible input and understood it but need more details to proceed."
     )
-    dialog_message: Optional[str] = Field(
+    info_message: Optional[str] = Field(
         default="",
         description="Put here the message to send to the customer other than the clarifying question."
     )

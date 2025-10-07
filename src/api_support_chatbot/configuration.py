@@ -68,10 +68,6 @@ class Configuration(BaseModel):
         default_factory=lambda: os.getenv("AZURE_HQ_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
         description="Azure OpenAI HQ deployment name for high-quality responses"
     )
-    azure_openai_model_name: str = Field(
-        default_factory=lambda: os.getenv("AZURE_OPENAI_MODEL_NAME", "gpt-4.1-mini"),
-        description="Azure OpenAI model name"
-    )
     
     # MCP Server Configuration
     mcp_servers: Dict[str, MCPServerConfig] = Field(

@@ -1,7 +1,7 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "chatbot": "./src/api_support_chatbot/main.py:create_graph"
+    "chatbot": "./src/api_support_chatbot/chatbot.py:create_graph"
   },
   "env": ".env"
 }

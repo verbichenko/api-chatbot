@@ -82,7 +82,7 @@ def create_error_message(error: Exception, context: str = "") -> str:
     error_msg = str(error)
     
     if context:
-        return f"Error in {context}: {error_type} - {error_msg}"
+        return f"{context}: {error_type} - {error_msg}"
     else:
         return f"{error_type}: {error_msg}"
 
