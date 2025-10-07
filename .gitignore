@@ -72,6 +72,7 @@ logs/
 
 # LangGraph specific
 .langgraph/
+.langgraph_api/
 
 .venv/
 .env
