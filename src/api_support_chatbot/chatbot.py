@@ -9,6 +9,7 @@ from langgraph.types import Command
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import AzureChatOpenAI
+from pydantic import BaseModel
 import json
 
 
@@ -206,12 +207,11 @@ async def coordinate_response(
     try:
         # Get configuration
         configuration = Configuration.from_runnable_config(config)
-        # Delete ?
         request_details = state.get("request_details")
         
         if not request_details:
             raise ValueError("No request details available for coordination")
-        if not request_details.produtct_id:
+        if not request_details.product_id:
             raise ValueError("No product specified.")
         
         # Configure the model for structured output
@@ -501,13 +501,22 @@ async def assemble_final_response(
         )
 
 
+class ChatbotInput(BaseModel):
+    """Input schema for the chatbot graph."""
+    messages: List[BaseMessage]
+
+class ChatbotOutput(BaseModel):
+    """Output schema for the chatbot graph."""
+    messages: List[BaseMessage]
+
 def create_chatbot_graph() -> StateGraph:
     """Create and configure the main chatbot graph."""
     
     # Create the main graph
     builder = StateGraph(
-        ChatbotState,
-        config_schema=Configuration
+        state_schema=ChatbotState,
+        input_schema=ChatbotInput,
+        output_schema=ChatbotOutput
     )
     
     # Add nodes

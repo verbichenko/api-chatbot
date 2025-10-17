@@ -23,7 +23,7 @@ class RequestDetails(BaseModel):
         default="",
         description="Put here the message to send to the customer other than the clarifying question."
     )
-    produtct_id: Optional[str] = Field(
+    product_id: Optional[str] = Field(
         default=None,
         description="The ID of the product ID the customer is inquiring about."
     )
@@ -95,10 +95,10 @@ def items_reducer(current_value, new_value):
 class ChatbotState(MessagesState):
     """Main chatbot state containing all conversation and processing data."""
 
-    clarification_attempts: int
-    max_clarification_attempts: int
+    clarification_attempts: int = Field(default=0)
+    max_clarification_attempts: int = Field(default=3)
 
-    request_details: Optional[RequestDetails] = None
-    request_items: Annotated[list[RequestItem], items_reducer] = []
-    response_items: Annotated[list[ResponseItem], items_reducer] = []
-    assembled_response: Optional[AssembledResponse] = None
+    request_details: Optional[RequestDetails] = Field(default=None)
+    request_items: Annotated[list[RequestItem], items_reducer] = Field(default_factory=list)
+    response_items: Annotated[list[ResponseItem], items_reducer] = Field(default_factory=list)
+    assembled_response: Optional[AssembledResponse] = Field(default=None)

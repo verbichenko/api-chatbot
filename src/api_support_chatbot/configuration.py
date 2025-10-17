@@ -3,9 +3,9 @@
 import os
 from enum import Enum
 from typing import Any, Dict, Optional
-
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
 
 class MCPTransport(Enum):
@@ -107,21 +107,49 @@ class Configuration(BaseModel):
     @classmethod
     def from_env(cls) -> "Configuration":
         """Create configuration from environment variables."""
+        load_dotenv()
         return cls()
     
     @classmethod
     def from_runnable_config(cls, config: Optional[RunnableConfig] = None) -> "Configuration":
-        """Create configuration from LangGraph runnable config."""
+        """Create configuration from environment variables and override with runnable config values.
+        
+        Note: This preserves checkpointer keys (thread_id, checkpoint_ns, checkpoint_id)
+        and only extracts Configuration-specific fields.
+        """
+        # Start with environment configuration
+        env_config = cls.from_env()
+        
+        # If no config provided or no configurable section, return env config
         if config is None or "configurable" not in config:
-            return cls.from_env()
+            return env_config
         
         configurable = config["configurable"]
-        if isinstance(configurable, dict):
-            return cls(**configurable)
-        elif isinstance(configurable, Configuration):
+        
+        # If configurable is already a Configuration instance, return it
+        if isinstance(configurable, Configuration):
             return configurable
-        else:
-            return cls.from_env()
+        
+        # If configurable is a dict, extract only Configuration fields
+        # Leave checkpointer keys (thread_id, checkpoint_ns, checkpoint_id) untouched
+        if isinstance(configurable, dict):
+            # Get valid Configuration field names
+            config_fields = set(cls.model_fields.keys())
+            
+            # Extract only Configuration-related fields from configurable
+            config_overrides = {
+                k: v for k, v in configurable.items() 
+                if k in config_fields
+            }
+            
+            # If there are overrides, apply them
+            if config_overrides:
+                config_dict = env_config.model_dump()
+                config_dict.update(config_overrides)
+                return cls(**config_dict)
+        
+        # Otherwise, return env config
+        return env_config
     
     
     def get_mcp_connections(self) -> Dict[str, Dict[str, Any]]:

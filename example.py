@@ -1,11 +1,9 @@
-"""Example usage of the API Support Chatbot."""
+"""Simle console version of the API Support Chatbot for testing purposes."""
 
 import asyncio
 import os
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from src.api_support_chatbot.chatbot import create_chatbot_graph
-from src.api_support_chatbot.configuration import Configuration
 from src.api_support_chatbot.prompts import GREETING_MESSAGE
 import uuid
 
@@ -14,11 +12,6 @@ import uuid
 async def run_example():
     """Run an example conversation with the chatbot."""
     
-    # Load environment variables
-    load_dotenv()
-    
-    # Create configuration
-    config = Configuration.from_env()
     
     # Create the chatbot graph
     graph = create_chatbot_graph()
@@ -28,7 +21,7 @@ async def run_example():
         
     try:
         # Run the chatbot thread_id
-        graph_config = {"configurable": config.model_dump()}
+        graph_config = {"configurable": {}}
         graph_config["configurable"]["thread_id"] = str(uuid.uuid4())[:8]
         #Show a greeting message
         print(GREETING_MESSAGE)

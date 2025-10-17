@@ -38,6 +38,8 @@ dependencies = [
     "fastapi>=0.110.0",
     "httpx>=0.27.0",
     "aiofiles>=24.0.0",
+    "langserve[all]>=0.3.0",
+    "sse-starlette>=2.0.0",
 ]
 
 [project.optional-dependencies]

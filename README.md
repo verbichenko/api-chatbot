@@ -32,10 +32,17 @@ The chatbot consists of four main agents:
    pip install -e .
    ```
 
-3. **Run the Chatbot**:
+3. **Run the Example Console Chatbot**:
    ```bash
-   python -m api_support_chatbot.main
+   python example.py
    ```
+
+4. **Run the Production Server** (LangServe):
+   ```bash
+   python serve.py
+   ```
+   
+   See [QUICKSTART.md](QUICKSTART.md) for a quick start guide and [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 
 ## Configuration
 

@@ -6,6 +6,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Note: src/api_support_chatbot/vendor/ should be committed
+# It contains patched dependencies needed for deployment
+
 # Distribution / packaging
 .Python
 build/
